@@ -19,18 +19,17 @@ jobs:
           java-version: '17'
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
-      - name: Set Android NDK env
+      - name: Find & set NDK
         run: |
           SDK_ROOT="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
           NDK_DIR=$(ls -1d $SDK_ROOT/ndk/* 2>/dev/null | sort -V | tail -1)
           if [ -n "$NDK_DIR" ]; then
             echo "ANDROID_NDK_HOME=$NDK_DIR" >> $GITHUB_ENV
           fi
-          echo "SDK_ROOT=$SDK_ROOT"
-          echo "NDK_DIR=$NDK_DIR"
-      - name: Install gomobile
+      - name: Install SagerNet gomobile fork
         run: |
-          go install golang.org/x/mobile/cmd/gomobile@latest
+          go install github.com/sagernet/gomobile/cmd/gomobile@v0.1.4
+          go install github.com/sagernet/gomobile/cmd/gobind@v0.1.4
           echo "$HOME/go/bin:$GOPATH/bin" >> $GITHUB_PATH
       - name: Clone sing-box v1.11.0
         run: |
@@ -39,13 +38,13 @@ jobs:
           go mod download 2>&1
       - name: Build AAR with utls
         run: |
-          set -o pipefail
           cd sing-box
           gomobile bind -v \
             -tags "with_clash_api,with_gvisor,with_utls" \
             -target=android -androidapi=26 \
             -o libbox.aar ./experimental/libbox 2>&1 | tee ../build.log
-      - name: Upload build log (always)
+          echo "AAR size: $(ls -lh ../build.log 2>/dev/null || echo 'no log')"
+      - name: Upload build log
         if: always()
         uses: actions/upload-artifact@v4
         with:
