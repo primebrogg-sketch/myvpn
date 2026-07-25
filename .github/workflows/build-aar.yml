@@ -1,0 +1,31 @@
+name: Build libbox AAR
+on:
+  workflow_dispatch:
+  push:
+    paths: [".github/workflows/build-aar.yml"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - name: Install gomobile
+        run: |
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+      - name: Clone sing-box v1.11.0
+        run: |
+          git clone --depth 1 --branch v1.11.0 https://github.com/SagerNet/sing-box.git
+      - name: Build AAR with utls
+        run: |
+          cd sing-box
+          gomobile init
+          gomobile bind -tags "with_clash_api,with_gvisor,with_utls" -target=android -androidapi=26 -o libbox.aar ./experimental/libbox
+      - name: Upload AAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: libbox-aar
+          path: sing-box/libbox.aar

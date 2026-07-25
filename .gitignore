@@ -1,0 +1,28 @@
+# Build outputs
+/build/
+/app/build/
+/.gradle/
+/local.properties
+
+# Gradle
+*.jar
+*.war
+*.ear
+*.class
+
+# IDE
+/.idea/
+/.vscode/
+*.iml
+*.iws
+*.ipr
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Native libs (keep libbox.aar if needed)
+!/app/libs/libbox.aar
+
+# Logs
+*.log
