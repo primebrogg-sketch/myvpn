@@ -4,10 +4,6 @@ on:
   push:
     branches: [main]
 
-env:
-  ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
-  ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/27.0.12077973
-
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -17,9 +13,25 @@ jobs:
         with:
           go-version: '1.22.10'
           cache: false
-      - name: Setup Android SDK/NDK
-        uses: android-actions/setup-android@v3
+      - name: Find Android NDK
+        id: ndk
+        run: |
+          SDK_ROOT="/usr/local/lib/android/sdk"
+          if [ -d "$SDK_ROOT/ndk" ]; then
+            NDK_VERSION=$(ls -1 "$SDK_ROOT/ndk" | sort -V | tail -1)
+            echo "NDK version: $NDK_VERSION"
+            echo "ndk_path=$SDK_ROOT/ndk/$NDK_VERSION" >> $GITHUB_OUTPUT
+            echo "sdk_root=$SDK_ROOT" >> $GITHUB_OUTPUT
+          else
+            echo "Android SDK/NDK not found at $SDK_ROOT"
+            ls -la /usr/local/lib/android/ 2>/dev/null || echo "No android dir"
+            exit 1
+          fi
       - name: Install gomobile
+        env:
+          ANDROID_HOME: ${{ steps.ndk.outputs.sdk_root }}
+          ANDROID_SDK_ROOT: ${{ steps.ndk.outputs.sdk_root }}
+          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk_path }}
         run: |
           go install golang.org/x/mobile/cmd/gomobile@latest
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
@@ -27,10 +39,13 @@ jobs:
         run: |
           git clone --depth 1 --branch v1.11.0 https://github.com/SagerNet/sing-box.git
       - name: Build AAR with utls
+        env:
+          ANDROID_HOME: ${{ steps.ndk.outputs.sdk_root }}
+          ANDROID_SDK_ROOT: ${{ steps.ndk.outputs.sdk_root }}
+          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk_path }}
         run: |
           cd sing-box
-          gomobile init
-          gomobile bind -tags "with_clash_api,with_gvisor,with_utls" -target=android -androidapi=26 -o libbox.aar ./experimental/libbox
+          gomobile bind -tags "with_clash_api,with_gvisor,with_utls" -target=android -androidapi=26 -o libbox.aar ./experimental/libbox 2>&1
       - name: Upload AAR
         uses: actions/upload-artifact@v4
         with:
