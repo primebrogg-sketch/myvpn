@@ -9,8 +9,9 @@ object SingBoxConfigBuilder {
 
     fun build(servers: List<ServerConfig>): String {
         val outbounds = JSONArray()
-
-        servers.forEachIndexed { i, s ->
+        val filteredServers = servers.filter { !it.raw.contains("security=reality") }
+        
+        filteredServers.forEachIndexed { i, s ->
             val tag = "proxy-$i"
             val ob = when (s.protocol) {
                 Protocol.VLESS_REALITY -> vlessOutbound(s, tag)
@@ -69,8 +70,7 @@ object SingBoxConfigBuilder {
                         put("outbound", "direct")
                     })
                 })
-                put("final", "proxy-0")
-                put("auto_detect_interface", true)
+put("final", "proxy-0")
                 put("override_android_vpn", true)
             })
         }.toString()

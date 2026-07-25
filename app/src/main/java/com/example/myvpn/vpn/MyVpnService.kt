@@ -1,9 +1,10 @@
 package com.example.myvpn.vpn
 
 import android.app.*
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
-import android.net.VpnService
+import android.net.*
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import androidx.core.app.NotificationCompat
@@ -16,6 +17,7 @@ import libbox.NetworkInterfaceIterator
 import libbox.Notification as SingNotification
 import libbox.PlatformInterface
 import libbox.SetupOptions
+import libbox.StringIterator
 import libbox.TunOptions
 import libbox.WIFIState
 
@@ -24,6 +26,8 @@ class MyVpnService : VpnService() {
     private var service: BoxService? = null
     private var connectionJob: Job? = null
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private var activeNetwork: Network? = null
 
     sealed class ServiceStatus {
         object Idle : ServiceStatus()
@@ -50,6 +54,7 @@ class MyVpnService : VpnService() {
             fixAndroidStack = true
         }
         Libbox.setup(setupOptions)
+        registerNetworkMonitor()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -65,6 +70,31 @@ class MyVpnService : VpnService() {
             }
         }
         return START_STICKY
+    }
+
+    private fun registerNetworkMonitor() {
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                activeNetwork = network
+                android.util.Log.d("MyVPN", "Network available: $network")
+                service?.resetNetwork()
+            }
+
+            override fun onLost(network: Network) {
+                if (activeNetwork == network) activeNetwork = null
+                android.util.Log.d("MyVPN", "Network lost: $network")
+                service?.resetNetwork()
+            }
+
+            override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
+                android.util.Log.d("MyVPN", "Network capabilities changed: $network")
+                service?.resetNetwork()
+            }
+        }
+        networkCallback = callback
+        cm.registerDefaultNetworkCallback(callback)
+        activeNetwork = cm.activeNetwork
     }
 
     private fun startVpn(configJson: String) {
@@ -128,7 +158,8 @@ class MyVpnService : VpnService() {
                     override fun usePlatformAutoDetectInterfaceControl() = true
 
                     override fun autoDetectInterfaceControl(fd: Int) {
-                        runCatching { protect(fd) }
+                        val result = runCatching { protect(fd) }
+                        android.util.Log.d("MyVPN/sing-box", "protect(fd=$fd) = ${result.getOrNull()}, error: ${result.exceptionOrNull()?.message}")
                     }
 
                     override fun useProcFS() = false
@@ -142,7 +173,50 @@ class MyVpnService : VpnService() {
 
                     override fun uidByPackageName(packageName: String) = -1
 
-                    override fun getInterfaces(): NetworkInterfaceIterator? = null
+                    override fun getInterfaces(): NetworkInterfaceIterator? {
+                        val enumeration = runCatching { java.net.NetworkInterface.getNetworkInterfaces() }.getOrNull() ?: return null
+                        val list = mutableListOf<libbox.NetworkInterface>()
+                        while (enumeration.hasMoreElements()) {
+                            val netIface = enumeration.nextElement()
+                            val name = netIface.name ?: continue
+                            if (name.isEmpty()) continue
+                            val li = libbox.NetworkInterface()
+                            li.name = name
+                            li.index = netIface.index
+                            li.mtu = netIface.mtu
+                            val addrList = mutableListOf<String>()
+                            val addresses = netIface.inetAddresses
+                            while (addresses.hasMoreElements()) {
+                                addrList.add(addresses.nextElement().hostAddress ?: "")
+                            }
+                            li.addresses = object : StringIterator {
+                                val iter = addrList.iterator()
+                                override fun hasNext() = iter.hasNext()
+                                override fun next() = iter.next()
+                                override fun len() = addrList.size
+                            }
+                            var flags = 0
+                            if (netIface.isUp) flags = flags or 1
+                            if (netIface.isLoopback) flags = flags or 4
+                            if (netIface.isPointToPoint) flags = flags or 8
+                            if (netIface.supportsMulticast()) flags = flags or 16
+                            li.flags = flags
+                            li.type = when {
+                                netIface.isLoopback -> 0
+                                name.startsWith("tun") -> 6
+                                name.startsWith("wlan") -> 2
+                                name.startsWith("eth") -> 1
+                                name.startsWith("rmnet") || name.startsWith("ccmni") -> 3
+                                else -> 0
+                            }
+                            list.add(li)
+                        }
+                        return object : NetworkInterfaceIterator {
+                            val iter = list.iterator()
+                            override fun hasNext() = iter.hasNext()
+                            override fun next() = iter.next()
+                        }
+                    }
 
                     override fun startDefaultInterfaceMonitor(listener: InterfaceUpdateListener?) {}
 
@@ -161,6 +235,11 @@ class MyVpnService : VpnService() {
                     }
 
                     override fun sendNotification(notification: SingNotification?) {}
+                }
+
+                activeNetwork?.let { network ->
+                    val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+                    runCatching { cm.bindProcessToNetwork(network) }
                 }
 
                 val svc = Libbox.newService(configJson, platformInterface) ?: throw IllegalStateException("newService returned null")
@@ -219,6 +298,9 @@ class MyVpnService : VpnService() {
     }
 
     override fun onDestroy() {
+        networkCallback?.let {
+            runCatching { (getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager).unregisterNetworkCallback(it) }
+        }
         connectionJob?.cancel()
         runCatching { service?.close() }
         runCatching { tunFd?.close() }
