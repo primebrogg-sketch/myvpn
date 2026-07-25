@@ -13,54 +13,40 @@ jobs:
         with:
           go-version: '1.22.10'
           cache: false
-      - name: Find Android NDK
-        id: ndk
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Set Android NDK env
         run: |
-          SDK_ROOT="/usr/local/lib/android/sdk"
-          echo "=== Looking for Android SDK ==="
-          ls -la /usr/local/lib/android/ 2>/dev/null || echo "No /usr/local/lib/android/"
-          ls -la $SDK_ROOT 2>/dev/null || echo "No SDK at $SDK_ROOT"
-          ls -la $SDK_ROOT/ndk 2>/dev/null || echo "No NDK at $SDK_ROOT/ndk"
-          ls -la $SDK_ROOT/platforms 2>/dev/null || echo "No platforms"
-          if [ -d "$SDK_ROOT/ndk" ]; then
-            NDK_VERSION=$(ls -1 "$SDK_ROOT/ndk" | sort -V | tail -1)
-            echo "NDK version: $NDK_VERSION"
-            echo "ndk_path=$SDK_ROOT/ndk/$NDK_VERSION" >> $GITHUB_OUTPUT
-            echo "sdk_root=$SDK_ROOT" >> $GITHUB_OUTPUT
-            echo "ANDROID_HOME=$SDK_ROOT" >> $GITHUB_ENV
-            echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> $GITHUB_ENV
-            echo "ANDROID_NDK_HOME=$SDK_ROOT/ndk/$NDK_VERSION" >> $GITHUB_ENV
-          else
-            echo "Android SDK/NDK not found at $SDK_ROOT, trying alternative paths..."
-            find / -name "ndk-build" 2>/dev/null | head -5
-            find / -name "android" -type d 2>/dev/null | head -5
-            exit 1
+          SDK_ROOT="$ANDROID_HOME"
+          if [ -z "$SDK_ROOT" ]; then SDK_ROOT="/usr/local/lib/android/sdk"; fi
+          echo "SDK_ROOT=$SDK_ROOT"
+          NDK_DIR=$(ls -1d $SDK_ROOT/ndk/* 2>/dev/null | sort -V | tail -1)
+          echo "NDK_DIR=$NDK_DIR"
+          if [ -n "$NDK_DIR" ]; then
+            echo "ANDROID_NDK_HOME=$NDK_DIR" >> $GITHUB_ENV
           fi
+          ls -la $SDK_ROOT/platforms/ 2>/dev/null
       - name: Install gomobile
-        env:
-          ANDROID_HOME: ${{ steps.ndk.outputs.sdk_root }}
-          ANDROID_SDK_ROOT: ${{ steps.ndk.outputs.sdk_root }}
-          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk_path }}
         run: |
           go install golang.org/x/mobile/cmd/gomobile@latest
-          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+          echo "$GOPATH/bin:$HOME/go/bin" >> $GITHUB_PATH
       - name: Clone sing-box v1.11.0
         run: |
           git clone --depth 1 --branch v1.11.0 https://github.com/SagerNet/sing-box.git
           cd sing-box
           go mod download 2>&1
       - name: Build AAR with utls
-        env:
-          ANDROID_HOME: ${{ steps.ndk.outputs.sdk_root }}
-          ANDROID_SDK_ROOT: ${{ steps.ndk.outputs.sdk_root }}
-          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk_path }}
         run: |
           cd sing-box
-          echo "=== Testing go build ==="
-          go build ./... 2>&1 || echo "go build exit code: $?"
-          echo "=== Running gomobile bind ==="
-          gomobile bind -v -tags "with_clash_api,with_gvisor,with_utls" -target=android -androidapi=26 -o libbox.aar ./experimental/libbox 2>&1
-          echo "=== gomobile exit code: $? ==="
+          gomobile bind -v \
+            -ldflags "-checklinkname=0" \
+            -tags "with_clash_api,with_gvisor,with_utls,badlinkname,tfogo_checklinkname0" \
+            -target=android -androidapi=26 \
+            -o libbox.aar ./experimental/libbox 2>&1
       - name: Upload AAR
         uses: actions/upload-artifact@v4
         with:
