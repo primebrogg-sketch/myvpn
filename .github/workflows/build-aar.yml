@@ -2,7 +2,7 @@ name: Build libbox AAR
 on:
   workflow_dispatch:
   push:
-    paths: [".github/workflows/build-aar.yml"]
+    branches: [main]
 
 jobs:
   build:
