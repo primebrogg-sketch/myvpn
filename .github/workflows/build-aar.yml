@@ -28,7 +28,6 @@ jobs:
           fi
           echo "SDK_ROOT=$SDK_ROOT"
           echo "NDK_DIR=$NDK_DIR"
-          ls -la $SDK_ROOT/platforms/ 2>/dev/null
       - name: Install gomobile
         run: |
           go install golang.org/x/mobile/cmd/gomobile@latest
@@ -39,8 +38,6 @@ jobs:
           cd sing-box
           go mod download 2>&1
       - name: Build AAR with utls
-        id: build
-        continue-on-error: true
         run: |
           set -o pipefail
           cd sing-box
@@ -48,13 +45,8 @@ jobs:
             -tags "with_clash_api,with_gvisor,with_utls" \
             -target=android -androidapi=26 \
             -o libbox.aar ./experimental/libbox 2>&1 | tee ../build.log
-      - name: Show build log
+      - name: Upload build log (always)
         if: always()
-        run: |
-          echo "=== exit code: ${{ steps.build.outcome }} ==="
-          cat build.log 2>/dev/null || echo "No build log"
-      - name: Upload build log on failure
-        if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: build-log
